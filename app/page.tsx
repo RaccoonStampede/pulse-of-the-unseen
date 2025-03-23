@@ -3,17 +3,20 @@
 import { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
+// Define the audio data type
+interface AudioData {
+  intensity: number;
+  soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
+  highFreqEnergy: number;
+  lowFreqEnergy: number;
+  rhythmScore: number;
+}
+
 // Define the props type for TypeScript
 interface PulseVisualizationProps {
   color?: string;
   pulseRate?: number;
-  audioData?: {
-    intensity: number;
-    soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
-    highFreqEnergy: number;
-    lowFreqEnergy: number;
-    rhythmScore: number;
-  }; // Expanded audio data for visualization
+  audioData?: AudioData; // Use the AudioData interface
 }
 
 // Component for the pulsing visualization
@@ -151,13 +154,7 @@ export default function Home() {
   const [pulseData, setPulseData] = useState<PulseData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isListening, setIsListening] = useState(false);
-  const [audioData, setAudioData] = useState<{
-    intensity: number;
-    soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
-    highFreqEnergy: number;
-    lowFreqEnergy: number;
-    rhythmScore: number;
-  } | null>(null);
+  const [audioData, setAudioData] = useState<AudioData | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const dataArrayRef = useRef<Uint8Array | null>(null);

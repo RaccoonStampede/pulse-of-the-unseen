@@ -18,10 +18,11 @@ interface PulseVisualizationProps {
   color?: string;
   pulseRate?: number;
   audioData?: AudioData | null;
+  phrase?: string; // Added to influence visualization based on Grok's response
 }
 
 // Component for the pulsing visualization
-const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRate, audioData }) => {
+const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRate, audioData, phrase }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -143,61 +144,84 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
       if (audioData && audioData.intensity > 0) {
         const { intensity, soundType, rhythmScore } = audioData;
 
-        // **Simulate Grok's Control Logic**
-        const grokShapeControl = (soundType: string) => {
+        // **Simulate Grok's Control Logic, Enhanced with Phrase**
+        const grokShapeControl = (soundType: string, phrase?: string) => {
+          // Base control parameters based on sound type
+          let control = {
+            ribbonSpeed: 1 * intensity,
+            dotSwarm: 0.1 * intensity,
+            webPulse: 0.5 * intensity,
+            liquidFlow: 0.1 * intensity,
+            baseColor: 0x00ff00,
+          };
+
           switch (soundType) {
             case 'ambient': // e.g., Rain
-              return {
+              control = {
                 ribbonSpeed: 2 * intensity,
                 dotSwarm: 0.1 * intensity,
                 webPulse: 0.5 * intensity,
                 liquidFlow: 0.2 * intensity,
                 baseColor: 0x0000ff, // Blue
               };
+              break;
             case 'rhythmic': // e.g., Nature
-              return {
+              control = {
                 ribbonSpeed: 1 * intensity,
                 dotSwarm: 0.3 * rhythmScore,
                 webPulse: 1 * rhythmScore,
                 liquidFlow: 0.1 * intensity,
                 baseColor: 0x00ff00, // Green
               };
+              break;
             case 'sharp': // e.g., Sudden noises
-              return {
+              control = {
                 ribbonSpeed: 3 * intensity,
                 dotSwarm: 0.5 * intensity,
                 webPulse: 2 * intensity,
                 liquidFlow: 0.05 * intensity,
                 baseColor: 0xff0000, // Red
               };
+              break;
             case 'chaotic': // e.g., Erratic sounds
-              return {
+              control = {
                 ribbonSpeed: 4 * intensity,
                 dotSwarm: 1 * intensity,
                 webPulse: 3 * intensity,
                 liquidFlow: 0.3 * intensity,
                 baseColor: 0xff00ff, // Magenta
               };
+              break;
             case 'sorrowful': // e.g., Sad tones
-              return {
+              control = {
                 ribbonSpeed: 0.5 * intensity,
                 dotSwarm: 0.05 * intensity,
                 webPulse: 0.2 * intensity,
                 liquidFlow: 0.1 * intensity,
                 baseColor: 0x000088, // Deep blue
               };
-            default:
-              return {
-                ribbonSpeed: 1,
-                dotSwarm: 0.1,
-                webPulse: 0.5,
-                liquidFlow: 0.1,
-                baseColor: 0x00ff00,
-              };
+              break;
           }
+
+          // **Influence Control with Grok's Phrase**
+          if (phrase) {
+            const lowerPhrase = phrase.toLowerCase();
+            if (lowerPhrase.includes('ethereal') || lowerPhrase.includes('spirit')) {
+              control.ribbonSpeed *= 1.5; // Faster ribbons for ethereal feel
+              control.baseColor = 0x88ccff; // Light blue
+            } else if (lowerPhrase.includes('dark') || lowerPhrase.includes('shadow')) {
+              control.webPulse *= 2; // Stronger web pulsing
+              control.baseColor = 0x440044; // Dark purple
+            } else if (lowerPhrase.includes('echo') || lowerPhrase.includes('resonance')) {
+              control.liquidFlow *= 1.5; // More liquid flow
+              control.baseColor = 0x00aaff; // Cyan
+            }
+          }
+
+          return control;
         };
 
-        const control = grokShapeControl(soundType);
+        const control = grokShapeControl(soundType, phrase);
 
         // **Animate Ribbons**
         ribbonsRef.current.forEach((ribbon, i) => {
@@ -276,7 +300,7 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
         sceneRef.current.clear();
       }
     };
-  }, [color, pulseRate, audioData]);
+  }, [color, pulseRate, audioData, phrase]);
 
   return <canvas ref={canvasRef} style={{ width: '100%', height: '500px', background: 'black' }} />;
 };
@@ -286,6 +310,8 @@ interface PulseData {
   phrase: string;
   color: string;
   pulseRate: number;
+  error?: string;
+  errorDetails?: string;
 }
 
 // Main page component
@@ -411,11 +437,10 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description }),
       });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch pulse data');
-      }
       const data: PulseData = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch pulse data');
+      }
       setPulseData(data);
     } catch (error: any) {
       console.error('Error fetching pulse data:', error);
@@ -423,6 +448,7 @@ export default function Home() {
         phrase: error.message || 'Error generating pulse',
         color: '#ff0000',
         pulseRate: 0.5,
+        error: error.message,
       });
     } finally {
       setIsLoading(false);
@@ -455,11 +481,14 @@ export default function Home() {
       {isLoading && <p>Loading...</p>}
       {pulseData && (
         <div>
-          <p style={{ fontSize: '18px', marginTop: '20px' }}>{pulseData.phrase}</p>
+          <p style={{ fontSize: '18px', marginTop: '20px' }}>
+            {pulseData.error ? `Error: ${pulseData.error}` : pulseData.phrase}
+          </p>
           <PulseVisualization
             color={pulseData.color}
             pulseRate={pulseData.pulseRate}
             audioData={audioData}
+            phrase={pulseData.phrase} // Pass Grok's phrase to influence visuals
           />
         </div>
       )}

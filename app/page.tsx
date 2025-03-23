@@ -16,7 +16,7 @@ interface AudioData {
 interface PulseVisualizationProps {
   color?: string;
   pulseRate?: number;
-  audioData?: AudioData; // Use the AudioData interface
+  audioData?: AudioData | null; // Allow null in addition to undefined
 }
 
 // Component for the pulsing visualization
@@ -255,6 +255,15 @@ export default function Home() {
   };
 
   const handleSubmit = async () => {
+    if (!description.trim()) {
+      setPulseData({
+        phrase: 'Please enter a description',
+        color: '#ff0000',
+        pulseRate: 0.5,
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
       const response = await fetch('/api/pulse', {
@@ -262,13 +271,16 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description }),
       });
+      if (!response.ok) {
+        throw new Error('Failed to fetch pulse data');
+      }
       const data: PulseData = await response.json();
       setPulseData(data);
     } catch (error) {
       console.error('Error fetching pulse data:', error);
       setPulseData({
         phrase: 'Error generating pulse',
-        color: '#ff0000', // Red color for error
+        color: '#ff0000',
         pulseRate: 0.5,
       });
     } finally {

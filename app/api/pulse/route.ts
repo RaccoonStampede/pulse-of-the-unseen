@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-2-latest', // Use the model name from your snippet
+        model: 'grok-2-latest',
         messages: [
           {
             role: 'system',
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       color: '#4a90e2',
       pulseRate: 0.5,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error generating pulse:', error);
     return NextResponse.json(
       {
@@ -79,6 +79,7 @@ export async function POST(request: Request) {
         color: '#ff0000',
         pulseRate: 0.5,
         error: error.message,
+        errorDetails: error.stack || 'No stack trace available',
       },
       { status: 500 }
     );

@@ -1,9 +1,8 @@
-"use client"; // This tells Next.js this is a client-side component
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
-// Define the audio data type
 interface AudioData {
   intensity: number;
   soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
@@ -12,128 +11,156 @@ interface AudioData {
   rhythmScore: number;
 }
 
-// Define the props type for TypeScript
 interface PulseVisualizationProps {
   color?: string;
   pulseRate?: number;
-  audioData?: AudioData | null; // Allow null in addition to undefined
+  audioData?: AudioData | null;
 }
 
-// Component for the pulsing visualization
 const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRate, audioData }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sphereRef = useRef<THREE.Mesh | null>(null);
-  const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
-  const geometryRef = useRef<THREE.SphereGeometry | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const meshesRef = useRef<THREE.InstancedMesh[]>([]);
+  const positionsRef = useRef<THREE.Vector3[][]>([]);
+  const animationFrameIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    // Initialize Three.js scene
+    // Set up Three.js scene
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    cameraRef.current = camera;
     const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current });
     renderer.setSize(window.innerWidth, window.innerHeight);
     rendererRef.current = renderer;
 
-    // Create a sphere with a wireframe for an alien-like effect
-    const geometry = new THREE.SphereGeometry(1, 16, 16);
-    const material = new THREE.MeshBasicMaterial({
-      color: color || '#00ff00',
-      wireframe: true, // Alien-like wireframe look
+    camera.position.z = 8;
+
+    // Define multiple shape types
+    const instanceCount = 50; // Number of instances per shape type
+    const shapeTypes = [
+      { geometry: new THREE.TetrahedronGeometry(0.1), color: 0xffffff }, // Sharp, angular
+      { geometry: new THREE.SphereGeometry(0.1, 16, 16), color: 0x88ccff }, // Soft, round
+      { geometry: new THREE.BoxGeometry(0.1, 0.1, 0.1), color: 0x00ff00 }, // Structured
+    ];
+
+    // Create instanced meshes for each shape type
+    meshesRef.current = shapeTypes.map(({ geometry, color }) => {
+      const material = new THREE.MeshBasicMaterial({ color });
+      const mesh = new THREE.InstancedMesh(geometry, material, instanceCount);
+      scene.add(mesh);
+      return mesh;
     });
-    const sphere = new THREE.Mesh(geometry, material);
-    scene.add(sphere);
 
-    // Store references for cleanup
-    geometryRef.current = geometry;
-    materialRef.current = material;
-    sphereRef.current = sphere;
-
-    camera.position.z = 5;
+    // Initialize positions for each shape type
+    positionsRef.current = shapeTypes.map(() =>
+      Array.from({ length: instanceCount }, () => new THREE.Vector3(
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10
+      ))
+    );
 
     let time = 0;
-    let animationFrameId: number;
 
+    // Animation loop
     const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-      const rate = pulseRate || 0.5;
+      animationFrameIdRef.current = requestAnimationFrame(animate);
+      time += 0.05;
 
-      if (audioData && audioData.intensity > 0) {
-        const { intensity, soundType, highFreqEnergy, lowFreqEnergy, rhythmScore } = audioData;
+      if (audioData && audioData.intensity > 0 && meshesRef.current.length) {
+        const { intensity, soundType, rhythmScore } = audioData;
+        const dummy = new THREE.Object3D();
 
-        // Base scale adjustment
-        let scale = 1 + intensity * 0.5 + Math.sin(time) * 0.2;
-        sphere.scale.set(scale, scale, scale);
+        meshesRef.current.forEach((mesh, shapeIndex) => {
+          const positions = positionsRef.current[shapeIndex];
 
-        // Default rotation
-        sphere.rotation.y += intensity * 0.02;
+          for (let i = 0; i < instanceCount; i++) {
+            const pos = positions[i];
 
-        // Visual effects based on sound type
-        switch (soundType) {
-          case 'sharp':
-            // Sharp, high-pitched sounds: Rapid, jagged scaling and bright colors
-            sphere.scale.x = scale + Math.sin(time * 5) * 0.3;
-            sphere.scale.z = scale - Math.sin(time * 5) * 0.3;
-            material.color.set(`rgb(${255 * highFreqEnergy}, 50, 150)`); // Bright red for sharpness
-            break;
-          case 'rhythmic':
-            // Rhythmic sounds: Pulsing in sync with rhythm, vibrant colors
-            sphere.scale.setScalar(scale + Math.sin(time * rhythmScore * 2) * 0.4);
-            material.color.set(`rgb(100, ${255 * rhythmScore}, 200)`); // Greenish for rhythm
-            break;
-          case 'chaotic':
-            // Chaotic sounds: Erratic scaling and rotation, dark colors
-            sphere.scale.x = scale + Math.random() * 0.5;
-            sphere.scale.y = scale - Math.random() * 0.5;
-            sphere.rotation.x += intensity * 0.05;
-            material.color.set(`rgb(150, 50, ${255 * intensity})`); // Dark blue/purple for chaos
-            break;
-          case 'ambient':
-            // Ambient sounds: Smooth, slow pulsing, soft colors
-            sphere.scale.setScalar(scale + Math.sin(time * 0.5) * 0.2);
-            material.color.set(`rgb(100, 150, ${200 * (1 - intensity)})`); // Soft blue for ambiance
-            break;
-          case 'sorrowful':
-            // Sorrowful sounds: Slow, deep pulsing, blue hues
-            sphere.scale.setScalar(scale + Math.sin(time * 0.3) * 0.1);
-            material.color.set(`rgb(50, 50, ${255 * lowFreqEnergy})`); // Deep blue for sorrow
-            break;
-          default:
-            material.color.set(color || '#00ff00');
-        }
-      } else {
-        // Default pulsing without audio
-        sphere.scale.x = 1 + Math.sin(time * rate) * 0.5;
-        sphere.scale.y = 1 + Math.sin(time * rate) * 0.5;
-        sphere.scale.z = 1 + Math.sin(time * rate) * 0.5;
-        material.color.set(color || '#00ff00');
+            // Update position and scale based on sound type
+            switch (soundType) {
+              case 'ambient':
+                // Fall like rain or drifting particles
+                pos.y -= 0.05 * (1 + intensity) * (shapeIndex + 1) * 0.5;
+                if (pos.y < -5) pos.y = 5;
+                break;
+              case 'rhythmic':
+                // Pulse in size or sway with rhythm
+                const scale = 1 + Math.sin(time * rhythmScore * 2 + shapeIndex) * 0.5 * intensity;
+                dummy.scale.setScalar(scale);
+                pos.x += Math.cos(time + i) * 0.02 * rhythmScore;
+                break;
+              case 'sharp':
+                // Erratic, fast movements
+                pos.x += (Math.random() - 0.5) * 0.3 * intensity;
+                pos.y += (Math.random() - 0.5) * 0.3 * intensity;
+                pos.z += (Math.random() - 0.5) * 0.3 * intensity;
+                break;
+              case 'chaotic':
+                // Scatter and regroup
+                pos.x += Math.sin(time + i + shapeIndex) * 0.15 * intensity;
+                pos.y += Math.cos(time + i + shapeIndex) * 0.15 * intensity;
+                break;
+              case 'sorrowful':
+                // Slow descent
+                pos.y -= 0.03 * (1 + intensity) * (shapeIndex + 1) * 0.5;
+                if (pos.y < -5) pos.y = 5;
+                dummy.scale.setScalar(1 - intensity * 0.5); // Shrink over time
+                break;
+            }
+
+            dummy.position.copy(pos);
+
+            // Adjust color dynamically
+            const material = mesh.material as THREE.MeshBasicMaterial;
+            switch (soundType) {
+              case 'ambient':
+                material.color.set(0x88ccff); // Light blue
+                break;
+              case 'rhythmic':
+                material.color.set(0x00ff00); // Green
+                break;
+              case 'sharp':
+                material.color.set(0xff0000); // Red
+                break;
+              case 'chaotic':
+                material.color.set(0xff00ff); // Magenta
+                break;
+              case 'sorrowful':
+                material.color.set(0x0000ff); // Deep blue
+                break;
+              default:
+                material.color.set(color || '#00ff00');
+            }
+
+            dummy.updateMatrix();
+            mesh.setMatrixAt(i, dummy.matrix);
+          }
+          mesh.instanceMatrix.needsUpdate = true;
+        });
       }
 
-      time += 0.05;
       renderer.render(scene, camera);
     };
     animate();
 
-    // Cleanup on unmount
+    // Cleanup
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      if (rendererRef.current) {
-        rendererRef.current.dispose();
-        rendererRef.current = null;
-      }
-      if (geometryRef.current) {
-        geometryRef.current.dispose();
-        geometryRef.current = null;
-      }
-      if (materialRef.current) {
-        materialRef.current.dispose();
-        materialRef.current = null;
-      }
-      if (sphereRef.current) {
-        scene.remove(sphereRef.current);
-        sphereRef.current = null;
+      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+      if (rendererRef.current) rendererRef.current.dispose();
+      if (sceneRef.current) {
+        sceneRef.current.children.forEach(child => {
+          if (child instanceof THREE.InstancedMesh) {
+            child.geometry.dispose();
+            (child.material as THREE.Material).dispose();
+          }
+        });
+        sceneRef.current.clear();
       }
     };
   }, [color, pulseRate, audioData]);
@@ -141,187 +168,4 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
   return <canvas ref={canvasRef} style={{ width: '100%', height: '500px' }} />;
 };
 
-// Define the pulse data type
-interface PulseData {
-  phrase: string;
-  color: string;
-  pulseRate: number;
-}
-
-// Main page component
-export default function Home() {
-  const [description, setDescription] = useState<string>('');
-  const [pulseData, setPulseData] = useState<PulseData | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isListening, setIsListening] = useState(false);
-  const [audioData, setAudioData] = useState<AudioData | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const intensityHistoryRef = useRef<number[]>([]); // For rhythm detection
-
-  // Start listening to microphone
-  const startListening = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const audioContext = new AudioContext();
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      source.connect(analyser);
-
-      // Store references for use in animation loop
-      audioContextRef.current = audioContext;
-      sourceRef.current = source;
-      analyserRef.current = analyser;
-      dataArrayRef.current = dataArray;
-
-      setIsListening(true);
-
-      // Start analyzing audio
-      const analyzeAudio = () => {
-        if (analyserRef.current && dataArrayRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-
-          // Calculate overall intensity
-          const avgFrequency = dataArrayRef.current.reduce((sum, val) => sum + val, 0) / dataArrayRef.current.length;
-          const intensity = avgFrequency / 255; // Normalize to 0-1
-
-          // Calculate frequency energies
-          const lowFreqEnergy = dataArrayRef.current.slice(0, 10).reduce((sum, val) => sum + val, 0) / (10 * 255); // Low frequencies
-          const highFreqEnergy = dataArrayRef.current.slice(-10).reduce((sum, val) => sum + val, 0) / (10 * 255); // High frequencies
-
-          // Detect rhythm by tracking intensity changes over time
-          intensityHistoryRef.current.push(intensity);
-          if (intensityHistoryRef.current.length > 30) intensityHistoryRef.current.shift(); // Keep last 30 frames
-          const rhythmScore = detectRhythm(intensityHistoryRef.current);
-
-          // Determine sound type
-          let soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
-          if (highFreqEnergy > 0.7 && intensity > 0.5) {
-            soundType = 'sharp'; // High-pitched, intense sounds
-          } else if (rhythmScore > 0.6) {
-            soundType = 'rhythmic'; // Regular intensity changes
-          } else if (intensity > 0.8 && highFreqEnergy > 0.5 && lowFreqEnergy > 0.5) {
-            soundType = 'chaotic'; // High intensity across frequencies
-          } else if (lowFreqEnergy > 0.6 && intensity < 0.4) {
-            soundType = 'sorrowful'; // Low frequencies, low intensity
-          } else {
-            soundType = 'ambient'; // Default for other sounds
-          }
-
-          setAudioData({ intensity, soundType, highFreqEnergy, lowFreqEnergy, rhythmScore });
-          requestAnimationFrame(analyzeAudio);
-        }
-      };
-      analyzeAudio();
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-      setIsListening(false);
-    }
-  };
-
-  // Stop listening to microphone
-  const stopListening = () => {
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    if (sourceRef.current) {
-      sourceRef.current.disconnect();
-      sourceRef.current = null;
-    }
-    analyserRef.current = null;
-    dataArrayRef.current = null;
-    intensityHistoryRef.current = [];
-    setIsListening(false);
-    setAudioData(null); // Reset audio data
-  };
-
-  // Helper function to detect rhythm
-  const detectRhythm = (history: number[]): number => {
-    if (history.length < 10) return 0;
-    let peaks = 0;
-    for (let i = 1; i < history.length - 1; i++) {
-      if (history[i] > history[i - 1] && history[i] > history[i + 1] && history[i] > 0.5) {
-        peaks++;
-      }
-    }
-    return peaks / (history.length / 2); // Normalize to 0-1
-  };
-
-  const handleSubmit = async () => {
-    if (!description.trim()) {
-      setPulseData({
-        phrase: 'Please enter a description',
-        color: '#ff0000',
-        pulseRate: 0.5,
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const response = await fetch('/api/pulse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description }),
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch pulse data');
-      }
-      const data: PulseData = await response.json();
-      setPulseData(data);
-    } catch (error) {
-      console.error('Error fetching pulse data:', error);
-      setPulseData({
-        phrase: 'Error generating pulse',
-        color: '#ff0000',
-        pulseRate: 0.5,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div style={{ textAlign: 'center', padding: '20px' }}>
-      <h1>Pulse of the Unseen</h1>
-      <input
-        type="text"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder="Describe your surroundings"
-        style={{ width: '80%', padding: '10px', fontSize: '16px', marginBottom: '10px' }}
-      />
-      <button
-        onClick={handleSubmit}
-        style={{ padding: '10px', fontSize: '16px', marginRight: '10px' }}
-        disabled={isLoading}
-      >
-        {isLoading ? 'Loading...' : 'Generate Pulse'}
-      </button>
-      <button
-        onClick={isListening ? stopListening : startListening}
-        style={{ padding: '10px', fontSize: '16px' }}
-      >
-        {isListening ? 'Stop Listening' : 'Start Listening'}
-      </button>
-      {isLoading && <p>Loading...</p>}
-      {pulseData && (
-        <div>
-          <p style={{ fontSize: '18px', marginTop: '20px' }}>{pulseData.phrase}</p>
-          <PulseVisualization
-            color={pulseData.color}
-            pulseRate={pulseData.pulseRate}
-            audioData={audioData}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
+export default PulseVisualization;

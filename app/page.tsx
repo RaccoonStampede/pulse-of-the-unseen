@@ -1,24 +1,26 @@
-"use client";
+"use client"; // This tells Next.js this is a client-side component
 
-import { useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { createNoise3D } from 'simplex-noise';
 
-// Define the structure of your audio data
+// Define the audio data type
 interface AudioData {
-  intensity: number; // Volume level (0 to 1)
-  soundType: 'ambient' | 'rhythmic' | 'sharp' | 'chaotic' | 'sorrowful'; // Sound categories
+  intensity: number;
+  soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
   highFreqEnergy: number;
   lowFreqEnergy: number;
   rhythmScore: number;
 }
 
+// Define the props type for PulseVisualization
 interface PulseVisualizationProps {
-  color?: string; // Optional base color
-  pulseRate?: number; // Optional pulse speed
-  audioData?: AudioData | null; // Audio data to drive the visualization
+  color?: string;
+  pulseRate?: number;
+  audioData?: AudioData | null;
 }
 
+// Component for the pulsing visualization
 const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRate, audioData }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -256,7 +258,7 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
         }
       }
 
-      renderer.render(scene, camera);
+      rendererRef.current?.render(scene, camera);
     };
     animate();
 
@@ -279,4 +281,188 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
   return <canvas ref={canvasRef} style={{ width: '100%', height: '500px', background: 'black' }} />;
 };
 
-export default PulseVisualization;
+// Define the pulse data type
+interface PulseData {
+  phrase: string;
+  color: string;
+  pulseRate: number;
+}
+
+// Main page component
+export default function Home() {
+  const [description, setDescription] = useState<string>('');
+  const [pulseData, setPulseData] = useState<PulseData | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isListening, setIsListening] = useState(false);
+  const [audioData, setAudioData] = useState<AudioData | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const intensityHistoryRef = useRef<number[]>([]); // For rhythm detection
+
+  // Start listening to microphone
+  const startListening = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      source.connect(analyser);
+
+      // Store references for use in animation loop
+      audioContextRef.current = audioContext;
+      sourceRef.current = source;
+      analyserRef.current = analyser;
+      dataArrayRef.current = dataArray;
+
+      setIsListening(true);
+
+      // Start analyzing audio
+      const analyzeAudio = () => {
+        if (analyserRef.current && dataArrayRef.current) {
+          analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+
+          // Calculate overall intensity
+          const avgFrequency = dataArrayRef.current.reduce((sum, val) => sum + val, 0) / dataArrayRef.current.length;
+          const intensity = avgFrequency / 255; // Normalize to 0-1
+
+          // Calculate frequency energies
+          const lowFreqEnergy = dataArrayRef.current.slice(0, 10).reduce((sum, val) => sum + val, 0) / (10 * 255); // Low frequencies
+          const highFreqEnergy = dataArrayRef.current.slice(-10).reduce((sum, val) => sum + val, 0) / (10 * 255); // High frequencies
+
+          // Detect rhythm by tracking intensity changes over time
+          intensityHistoryRef.current.push(intensity);
+          if (intensityHistoryRef.current.length > 30) intensityHistoryRef.current.shift(); // Keep last 30 frames
+          const rhythmScore = detectRhythm(intensityHistoryRef.current);
+
+          // Determine sound type
+          let soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
+          if (highFreqEnergy > 0.7 && intensity > 0.5) {
+            soundType = 'sharp'; // High-pitched, intense sounds
+          } else if (rhythmScore > 0.6) {
+            soundType = 'rhythmic'; // Regular intensity changes
+          } else if (intensity > 0.8 && highFreqEnergy > 0.5 && lowFreqEnergy > 0.5) {
+            soundType = 'chaotic'; // High intensity across frequencies
+          } else if (lowFreqEnergy > 0.6 && intensity < 0.4) {
+            soundType = 'sorrowful'; // Low frequencies, low intensity
+          } else {
+            soundType = 'ambient'; // Default for other sounds
+          }
+
+          setAudioData({ intensity, soundType, highFreqEnergy, lowFreqEnergy, rhythmScore });
+          requestAnimationFrame(analyzeAudio);
+        }
+      };
+      analyzeAudio();
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      setIsListening(false);
+    }
+  };
+
+  // Stop listening to microphone
+  const stopListening = () => {
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+    analyserRef.current = null;
+    dataArrayRef.current = null;
+    intensityHistoryRef.current = [];
+    setIsListening(false);
+    setAudioData(null); // Reset audio data
+  };
+
+  // Helper function to detect rhythm
+  const detectRhythm = (history: number[]): number => {
+    if (history.length < 10) return 0;
+    let peaks = 0;
+    for (let i = 1; i < history.length - 1; i++) {
+      if (history[i] > history[i - 1] && history[i] > history[i + 1] && history[i] > 0.5) {
+        peaks++;
+      }
+    }
+    return peaks / (history.length / 2); // Normalize to 0-1
+  };
+
+  const handleSubmit = async () => {
+    if (!description.trim()) {
+      setPulseData({
+        phrase: 'Please enter a description',
+        color: '#ff0000',
+        pulseRate: 0.5,
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/pulse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch pulse data');
+      }
+      const data: PulseData = await response.json();
+      setPulseData(data);
+    } catch (error: any) {
+      console.error('Error fetching pulse data:', error);
+      setPulseData({
+        phrase: error.message || 'Error generating pulse',
+        color: '#ff0000',
+        pulseRate: 0.5,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ textAlign: 'center', padding: '20px', background: 'black', color: 'white', minHeight: '100vh' }}>
+      <h1>Pulse of the Unseen</h1>
+      <input
+        type="text"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Describe your surroundings"
+        style={{ width: '80%', padding: '10px', fontSize: '16px', marginBottom: '10px' }}
+      />
+      <button
+        onClick={handleSubmit}
+        style={{ padding: '10px', fontSize: '16px', marginRight: '10px' }}
+        disabled={isLoading}
+      >
+        {isLoading ? 'Loading...' : 'Generate Pulse'}
+      </button>
+      <button
+        onClick={isListening ? stopListening : startListening}
+        style={{ padding: '10px', fontSize: '16px' }}
+      >
+        {isListening ? 'Stop Listening' : 'Start Listening'}
+      </button>
+      {isLoading && <p>Loading...</p>}
+      {pulseData && (
+        <div>
+          <p style={{ fontSize: '18px', marginTop: '20px' }}>{pulseData.phrase}</p>
+          <PulseVisualization
+            color={pulseData.color}
+            pulseRate={pulseData.pulseRate}
+            audioData={audioData}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

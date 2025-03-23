@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import Sentiment from 'sentiment';
+
+const sentiment = new Sentiment();
 
 export async function POST(request: Request) {
   const { description } = await request.json();
@@ -66,10 +69,31 @@ export async function POST(request: Request) {
 
     const phrase = data.choices[0].message.content.trim();
 
+    // Perform sentiment analysis on the generated phrase
+    const sentimentAnalysis = sentiment.analyze(phrase);
+    const sentimentScore = sentimentAnalysis.score;
+
+    // Adjust color and pulseRate based on sentiment
+    let color = '#4a90e2'; // Default blue
+    let pulseRate = 0.5;   // Default rate
+    if (sentimentScore > 0) {
+      color = '#ffff00';   // Positive: Yellow
+      pulseRate = 0.8;     // Faster for positive
+    } else if (sentimentScore < 0) {
+      color = '#000088';   // Negative: Dark blue
+      pulseRate = 0.3;     // Slower for negative
+    } else if (phrase.toLowerCase().includes('dark') || phrase.toLowerCase().includes('shadow')) {
+      color = '#440044';   // Dark purple for thematic match
+      pulseRate = 0.4;
+    } else if (phrase.toLowerCase().includes('ethereal') || phrase.toLowerCase().includes('spirit')) {
+      color = '#88ccff';   // Light blue for ethereal
+      pulseRate = 0.7;
+    }
+
     return NextResponse.json({
       phrase,
-      color: '#4a90e2',
-      pulseRate: 0.5,
+      color,
+      pulseRate,
     });
   } catch (error: any) {
     console.error('Error generating pulse:', error);

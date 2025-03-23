@@ -18,12 +18,21 @@ interface PulseVisualizationProps {
 
 // Component for the pulsing visualization
 const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRate, audioData }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sphereRef = useRef<THREE.Mesh | null>(null);
+  const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
+  const geometryRef = useRef<THREE.SphereGeometry | null>(null);
+
   useEffect(() => {
+    if (!canvasRef.current) return;
+
+    // Initialize Three.js scene
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer();
+    const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
 
     // Create a sphere with a wireframe for an alien-like effect
     const geometry = new THREE.SphereGeometry(1, 16, 16);
@@ -34,11 +43,18 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
     const sphere = new THREE.Mesh(geometry, material);
     scene.add(sphere);
 
+    // Store references for cleanup
+    geometryRef.current = geometry;
+    materialRef.current = material;
+    sphereRef.current = sphere;
+
     camera.position.z = 5;
 
     let time = 0;
+    let animationFrameId: number;
+
     const animate = () => {
-      requestAnimationFrame(animate);
+      animationFrameId = requestAnimationFrame(animate);
       const rate = pulseRate || 0.5;
 
       if (audioData && audioData.intensity > 0) {
@@ -97,13 +113,29 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
     };
     animate();
 
-    // Cleanup on component unmount
+    // Cleanup on unmount
     return () => {
-      document.body.removeChild(renderer.domElement);
+      cancelAnimationFrame(animationFrameId);
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        rendererRef.current = null;
+      }
+      if (geometryRef.current) {
+        geometryRef.current.dispose();
+        geometryRef.current = null;
+      }
+      if (materialRef.current) {
+        materialRef.current.dispose();
+        materialRef.current = null;
+      }
+      if (sphereRef.current) {
+        scene.remove(sphereRef.current);
+        sphereRef.current = null;
+      }
     };
   }, [color, pulseRate, audioData]);
 
-  return null;
+  return <canvas ref={canvasRef} style={{ width: '100%', height: '500px' }} />;
 };
 
 // Define the pulse data type

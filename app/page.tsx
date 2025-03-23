@@ -1,8 +1,12 @@
 "use client"; // This tells Next.js this is a client-side component
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { createNoise3D } from 'simplex-noise';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
+import Sentiment from 'sentiment';
 
 // Define the audio data type
 interface AudioData {
@@ -25,6 +29,7 @@ interface PulseVisualizationProps {
 const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRate, audioData, phrase }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const composerRef = useRef<EffectComposer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const ribbonsRef = useRef<THREE.Line[]>([]);
@@ -34,6 +39,7 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
   const noise = createNoise3D(); // Noise function for organic effects
   const animationFrameIdRef = useRef<number | null>(null);
   const timeRef = useRef(0); // Track time for animations
+  const sentiment = new Sentiment();
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -49,6 +55,14 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
     const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     rendererRef.current = renderer;
+
+    // **Post-Processing for Glow**
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+    composer.addPass(renderPass);
+    composer.addPass(bloomPass);
+    composerRef.current = composer;
 
     // **Add Lighting**
     const ambientLight = new THREE.AmbientLight(0x404040, 1);
@@ -90,6 +104,7 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       const material = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1 });
       const dots = new THREE.Points(geometry, material);
+      dots.userData.velocities = new Float32Array(particleCount * 3); // For flocking
       dotsRef.current = dots;
       scene.add(dots);
     };
@@ -103,7 +118,6 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
         const radius = 3 + Math.random() * 2;
         points.push(new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0));
       }
-      // Connect points to form a web
       const webGeometry = new THREE.BufferGeometry();
       const vertices = [];
       for (let i = 0; i < points.length; i++) {
@@ -122,7 +136,24 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
     // **Liquid (Fluid Surface)**
     const createLiquid = () => {
       const geometry = new THREE.PlaneGeometry(10, 10, 32, 32);
-      const material = new THREE.MeshPhongMaterial({ color: 0x0000ff, side: THREE.DoubleSide, shininess: 100 });
+      const material = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 }, amplitude: { value: 0.1 } },
+        vertexShader: `
+          uniform float time;
+          uniform float amplitude;
+          void main() {
+            vec3 pos = position;
+            pos.z += sin(pos.x * 5.0 + time) * amplitude + cos(pos.y * 5.0 + time) * amplitude;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          }
+        `,
+        fragmentShader: `
+          void main() {
+            gl_FragColor = vec4(0.0, 0.0, 1.0, 1.0); // Blue
+          }
+        `,
+        side: THREE.DoubleSide
+      });
       const liquid = new THREE.Mesh(geometry, material);
       liquid.rotation.x = -Math.PI / 2;
       liquid.position.y = -2;
@@ -144,77 +175,51 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
       if (audioData && audioData.intensity > 0) {
         const { intensity, soundType, rhythmScore } = audioData;
 
-        // **Simulate Grok's Control Logic, Enhanced with Phrase**
+        // **Simulate Grok's Control Logic, Enhanced with Phrase and Sentiment**
         const grokShapeControl = (soundType: string, phrase?: string) => {
-          // Base control parameters based on sound type
           let control = {
             ribbonSpeed: 1 * intensity,
             dotSwarm: 0.1 * intensity,
             webPulse: 0.5 * intensity,
             liquidFlow: 0.1 * intensity,
             baseColor: 0x00ff00,
+            glowIntensity: 1.0
           };
 
           switch (soundType) {
-            case 'ambient': // e.g., Rain
-              control = {
-                ribbonSpeed: 2 * intensity,
-                dotSwarm: 0.1 * intensity,
-                webPulse: 0.5 * intensity,
-                liquidFlow: 0.2 * intensity,
-                baseColor: 0x0000ff, // Blue
-              };
+            case 'ambient':
+              control = { ...control, ribbonSpeed: 2 * intensity, liquidFlow: 0.2 * intensity, baseColor: 0x0000ff };
               break;
-            case 'rhythmic': // e.g., Nature
-              control = {
-                ribbonSpeed: 1 * intensity,
-                dotSwarm: 0.3 * rhythmScore,
-                webPulse: 1 * rhythmScore,
-                liquidFlow: 0.1 * intensity,
-                baseColor: 0x00ff00, // Green
-              };
+            case 'rhythmic':
+              control = { ...control, dotSwarm: 0.3 * rhythmScore, webPulse: 1 * rhythmScore, baseColor: 0x00ff00 };
               break;
-            case 'sharp': // e.g., Sudden noises
-              control = {
-                ribbonSpeed: 3 * intensity,
-                dotSwarm: 0.5 * intensity,
-                webPulse: 2 * intensity,
-                liquidFlow: 0.05 * intensity,
-                baseColor: 0xff0000, // Red
-              };
+            case 'sharp':
+              control = { ...control, ribbonSpeed: 3 * intensity, dotSwarm: 0.5 * intensity, webPulse: 2 * intensity, baseColor: 0xff0000 };
               break;
-            case 'chaotic': // e.g., Erratic sounds
-              control = {
-                ribbonSpeed: 4 * intensity,
-                dotSwarm: 1 * intensity,
-                webPulse: 3 * intensity,
-                liquidFlow: 0.3 * intensity,
-                baseColor: 0xff00ff, // Magenta
-              };
+            case 'chaotic':
+              control = { ...control, ribbonSpeed: 4 * intensity, dotSwarm: 1 * intensity, webPulse: 3 * intensity, liquidFlow: 0.3 * intensity, baseColor: 0xff00ff };
               break;
-            case 'sorrowful': // e.g., Sad tones
-              control = {
-                ribbonSpeed: 0.5 * intensity,
-                dotSwarm: 0.05 * intensity,
-                webPulse: 0.2 * intensity,
-                liquidFlow: 0.1 * intensity,
-                baseColor: 0x000088, // Deep blue
-              };
+            case 'sorrowful':
+              control = { ...control, ribbonSpeed: 0.5 * intensity, dotSwarm: 0.05 * intensity, webPulse: 0.2 * intensity, baseColor: 0x000088 };
               break;
           }
 
-          // **Influence Control with Grok's Phrase**
           if (phrase) {
             const lowerPhrase = phrase.toLowerCase();
+            const sentimentAnalysis = sentiment.analyze(phrase);
+            if (sentimentAnalysis.score > 0) control.baseColor = 0xffff00; // Positive
+            else if (sentimentAnalysis.score < 0) control.baseColor = 0x000088; // Negative
+
             if (lowerPhrase.includes('ethereal') || lowerPhrase.includes('spirit')) {
-              control.ribbonSpeed *= 1.5; // Faster ribbons for ethereal feel
-              control.baseColor = 0x88ccff; // Light blue
+              control.ribbonSpeed *= 1.5;
+              control.glowIntensity = 2.0;
+              control.baseColor = 0x88ccff;
             } else if (lowerPhrase.includes('dark') || lowerPhrase.includes('shadow')) {
-              control.webPulse *= 2; // Stronger web pulsing
-              control.baseColor = 0x440044; // Dark purple
+              control.webPulse *= 2;
+              control.baseColor = 0x440044;
             } else if (lowerPhrase.includes('echo') || lowerPhrase.includes('resonance')) {
-              control.liquidFlow *= 1.5; // More liquid flow
-              control.baseColor = 0x00aaff; // Cyan
+              control.liquidFlow *= 1.5;
+              control.baseColor = 0x00aaff;
             }
           }
 
@@ -223,27 +228,32 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
 
         const control = grokShapeControl(soundType, phrase);
 
-        // **Animate Ribbons**
+        // **Animate Ribbons with Noise**
         ribbonsRef.current.forEach((ribbon, i) => {
           const positions = ribbon.geometry.attributes.position.array as Float32Array;
           for (let j = 0; j < positions.length / 3; j++) {
             const x = positions[j * 3];
-            const offset = (j / (positions.length / 3)) * Math.PI;
-            positions[j * 3 + 1] = Math.sin(offset + timeRef.current * control.ribbonSpeed) * 2;
-            positions[j * 3 + 2] = Math.cos(offset + timeRef.current * control.ribbonSpeed) * 2;
+            const time = timeRef.current * control.ribbonSpeed;
+            positions[j * 3 + 1] = noise(x * 0.1, time, i) * 2;
+            positions[j * 3 + 2] = noise(x * 0.1, time + 100, i) * 2;
           }
           ribbon.geometry.attributes.position.needsUpdate = true;
           (ribbon.material as THREE.LineBasicMaterial).color.set(control.baseColor);
         });
 
-        // **Animate Dots**
+        // **Animate Dots with Flocking**
         if (dotsRef.current) {
           const positions = dotsRef.current.geometry.attributes.position.array as Float32Array;
+          const velocities = dotsRef.current.userData.velocities as Float32Array;
           for (let i = 0; i < positions.length / 3; i++) {
-            positions[i * 3] += (Math.sin(timeRef.current + i) * control.dotSwarm);
-            positions[i * 3 + 1] += (Math.cos(timeRef.current + i) * control.dotSwarm);
-            positions[i * 3 + 2] += (Math.sin(timeRef.current + i) * control.dotSwarm);
-            // Keep dots within bounds
+            velocities[i * 3] += (Math.random() - 0.5) * control.dotSwarm;
+            velocities[i * 3 + 1] += (Math.random() - 0.5) * control.dotSwarm;
+            velocities[i * 3 + 2] += (Math.random() - 0.5) * control.dotSwarm;
+
+            positions[i * 3] += velocities[i * 3];
+            positions[i * 3 + 1] += velocities[i * 3 + 1];
+            positions[i * 3 + 2] += velocities[i * 3 + 2];
+
             positions[i * 3] = THREE.MathUtils.clamp(positions[i * 3], -5, 5);
             positions[i * 3 + 1] = THREE.MathUtils.clamp(positions[i * 3 + 1], -5, 5);
             positions[i * 3 + 2] = THREE.MathUtils.clamp(positions[i * 3 + 2], -5, 5);
@@ -252,37 +262,28 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
           (dotsRef.current.material as THREE.PointsMaterial).color.set(control.baseColor);
         }
 
-        // **Animate Web**
+        // **Animate Web with Glow**
         if (webRef.current) {
           const positions = webRef.current.geometry.attributes.position.array as Float32Array;
           for (let i = 0; i < positions.length / 3; i++) {
-            const x = positions[i * 3];
-            const y = positions[i * 3 + 1];
-            const z = positions[i * 3 + 2];
             const offset = Math.sin(timeRef.current * control.webPulse + i) * 0.5;
-            positions[i * 3 + 2] = z + offset;
+            positions[i * 3 + 2] = offset;
           }
           webRef.current.geometry.attributes.position.needsUpdate = true;
           (webRef.current.material as THREE.LineBasicMaterial).color.set(control.baseColor);
+          bloomPass.strength = control.glowIntensity;
         }
 
-        // **Animate Liquid**
+        // **Animate Liquid with Shader**
         if (liquidRef.current) {
-          const geometry = liquidRef.current.geometry as THREE.PlaneGeometry;
-          const positions = geometry.attributes.position.array as Float32Array;
-          for (let i = 0; i < positions.length / 3; i++) {
-            const x = positions[i * 3];
-            const y = positions[i * 3 + 1];
-            const distance = Math.sqrt(x * x + y * y);
-            const wave = Math.sin(distance * 5 - timeRef.current * control.liquidFlow) * intensity;
-            positions[i * 3 + 2] = wave;
-          }
-          geometry.attributes.position.needsUpdate = true;
-          (liquidRef.current.material as THREE.MeshPhongMaterial).color.set(control.baseColor);
+          const material = liquidRef.current.material as THREE.ShaderMaterial;
+          material.uniforms.time.value = timeRef.current;
+          material.uniforms.amplitude.value = control.liquidFlow;
+          (liquidRef.current.material as THREE.ShaderMaterial).needsUpdate = true;
         }
       }
 
-      rendererRef.current?.render(scene, camera);
+      composerRef.current?.render(); // Use composer for glow effect
     };
     animate();
 
@@ -290,6 +291,7 @@ const PulseVisualization: React.FC<PulseVisualizationProps> = ({ color, pulseRat
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
       if (rendererRef.current) rendererRef.current.dispose();
+      if (composerRef.current) composerRef.current.dispose();
       if (sceneRef.current) {
         sceneRef.current.children.forEach(child => {
           if (child instanceof THREE.Line || child instanceof THREE.Points || child instanceof THREE.Mesh) {
@@ -314,7 +316,7 @@ interface PulseData {
   errorDetails?: string;
 }
 
-// Main page component
+// Main page component (unchanged for now)
 export default function Home() {
   const [description, setDescription] = useState<string>('');
   const [pulseData, setPulseData] = useState<PulseData | null>(null);
@@ -340,7 +342,6 @@ export default function Home() {
 
       source.connect(analyser);
 
-      // Store references for use in animation loop
       audioContextRef.current = audioContext;
       sourceRef.current = source;
       analyserRef.current = analyser;
@@ -348,37 +349,25 @@ export default function Home() {
 
       setIsListening(true);
 
-      // Start analyzing audio
       const analyzeAudio = () => {
         if (analyserRef.current && dataArrayRef.current) {
           analyserRef.current.getByteFrequencyData(dataArrayRef.current);
 
-          // Calculate overall intensity
           const avgFrequency = dataArrayRef.current.reduce((sum, val) => sum + val, 0) / dataArrayRef.current.length;
-          const intensity = avgFrequency / 255; // Normalize to 0-1
+          const intensity = avgFrequency / 255;
+          const lowFreqEnergy = dataArrayRef.current.slice(0, 10).reduce((sum, val) => sum + val, 0) / (10 * 255);
+          const highFreqEnergy = dataArrayRef.current.slice(-10).reduce((sum, val) => sum + val, 0) / (10 * 255);
 
-          // Calculate frequency energies
-          const lowFreqEnergy = dataArrayRef.current.slice(0, 10).reduce((sum, val) => sum + val, 0) / (10 * 255); // Low frequencies
-          const highFreqEnergy = dataArrayRef.current.slice(-10).reduce((sum, val) => sum + val, 0) / (10 * 255); // High frequencies
-
-          // Detect rhythm by tracking intensity changes over time
           intensityHistoryRef.current.push(intensity);
-          if (intensityHistoryRef.current.length > 30) intensityHistoryRef.current.shift(); // Keep last 30 frames
+          if (intensityHistoryRef.current.length > 30) intensityHistoryRef.current.shift();
           const rhythmScore = detectRhythm(intensityHistoryRef.current);
 
-          // Determine sound type
           let soundType: 'sharp' | 'rhythmic' | 'chaotic' | 'ambient' | 'sorrowful';
-          if (highFreqEnergy > 0.7 && intensity > 0.5) {
-            soundType = 'sharp'; // High-pitched, intense sounds
-          } else if (rhythmScore > 0.6) {
-            soundType = 'rhythmic'; // Regular intensity changes
-          } else if (intensity > 0.8 && highFreqEnergy > 0.5 && lowFreqEnergy > 0.5) {
-            soundType = 'chaotic'; // High intensity across frequencies
-          } else if (lowFreqEnergy > 0.6 && intensity < 0.4) {
-            soundType = 'sorrowful'; // Low frequencies, low intensity
-          } else {
-            soundType = 'ambient'; // Default for other sounds
-          }
+          if (highFreqEnergy > 0.7 && intensity > 0.5) soundType = 'sharp';
+          else if (rhythmScore > 0.6) soundType = 'rhythmic';
+          else if (intensity > 0.8 && highFreqEnergy > 0.5 && lowFreqEnergy > 0.5) soundType = 'chaotic';
+          else if (lowFreqEnergy > 0.6 && intensity < 0.4) soundType = 'sorrowful';
+          else soundType = 'ambient';
 
           setAudioData({ intensity, soundType, highFreqEnergy, lowFreqEnergy, rhythmScore });
           requestAnimationFrame(analyzeAudio);
@@ -391,7 +380,6 @@ export default function Home() {
     }
   };
 
-  // Stop listening to microphone
   const stopListening = () => {
     if (audioContextRef.current) {
       audioContextRef.current.close();
@@ -405,10 +393,9 @@ export default function Home() {
     dataArrayRef.current = null;
     intensityHistoryRef.current = [];
     setIsListening(false);
-    setAudioData(null); // Reset audio data
+    setAudioData(null);
   };
 
-  // Helper function to detect rhythm
   const detectRhythm = (history: number[]): number => {
     if (history.length < 10) return 0;
     let peaks = 0;
@@ -417,7 +404,7 @@ export default function Home() {
         peaks++;
       }
     }
-    return peaks / (history.length / 2); // Normalize to 0-1
+    return peaks / (history.length / 2);
   };
 
   const handleSubmit = async () => {
@@ -488,7 +475,7 @@ export default function Home() {
             color={pulseData.color}
             pulseRate={pulseData.pulseRate}
             audioData={audioData}
-            phrase={pulseData.phrase} // Pass Grok's phrase to influence visuals
+            phrase={pulseData.phrase}
           />
         </div>
       )}

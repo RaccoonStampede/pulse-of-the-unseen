@@ -6,7 +6,6 @@ const sentiment = new Sentiment();
 export async function POST(request: Request) {
   const { description } = await request.json();
 
-  // Validate the description
   if (!description || typeof description !== 'string') {
     return NextResponse.json(
       {
@@ -19,7 +18,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Log the API key for debugging (be careful not to expose this in production logs)
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -34,7 +32,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Make a direct HTTP request to xAI's API
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -68,25 +65,22 @@ export async function POST(request: Request) {
     }
 
     const phrase = data.choices[0].message.content.trim();
-
-    // Perform sentiment analysis on the generated phrase
     const sentimentAnalysis = sentiment.analyze(phrase);
     const sentimentScore = sentimentAnalysis.score;
 
-    // Adjust color and pulseRate based on sentiment
-    let color = '#4a90e2'; // Default blue
-    let pulseRate = 0.5;   // Default rate
+    let color = '#4a90e2';
+    let pulseRate = 0.5;
     if (sentimentScore > 0) {
-      color = '#ffff00';   // Positive: Yellow
-      pulseRate = 0.8;     // Faster for positive
+      color = '#ffff00';
+      pulseRate = 0.8;
     } else if (sentimentScore < 0) {
-      color = '#000088';   // Negative: Dark blue
-      pulseRate = 0.3;     // Slower for negative
+      color = '#000088';
+      pulseRate = 0.3;
     } else if (phrase.toLowerCase().includes('dark') || phrase.toLowerCase().includes('shadow')) {
-      color = '#440044';   // Dark purple for thematic match
+      color = '#440044';
       pulseRate = 0.4;
     } else if (phrase.toLowerCase().includes('ethereal') || phrase.toLowerCase().includes('spirit')) {
-      color = '#88ccff';   // Light blue for ethereal
+      color = '#88ccff';
       pulseRate = 0.7;
     }
 
